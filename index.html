@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>認可コードフロー体験</title>
+<style>
+  :root{
+    --ink:#1c2321;
+    --paper:#f3efe6;
+    --line:#c9c0ac;
+    --user:#2f6f6a;      /* 人間 */
+    --browser:#7a6a9e;   /* ブラウザ */
+    --app:#c0562f;       /* アプリ RP */
+    --authz:#3358a0;     /* 認可サーバ */
+    --resource:#4a7a34;  /* リソースサーバ */
+    --idtok:#3358a0;
+    --acctok:#4a7a34;
+    --code:#8a6d1f;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:940px;margin:0 auto;padding:24px 18px 80px;}
+  header h1{
+    font-size:clamp(20px,4.4vw,30px);
+    letter-spacing:-.01em;margin:0 0 4px;
+  }
+  header p{margin:0 0 20px;color:#5b5548;font-size:14px;}
+
+  /* ステージ：5人の登場人物 */
+  .stage{
+    position:relative;
+    border:1.5px solid var(--line);
+    background:#fbf9f3;
+    border-radius:14px;
+    padding:16px 10px 10px;
+    margin-bottom:18px;
+    overflow:hidden;
+  }
+  .actors{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:6px;
+    position:relative;
+    z-index:2;
+  }
+  .actor{
+    text-align:center;
+    padding:10px 4px;
+    border-radius:10px;
+    border:1.5px solid transparent;
+    transition:.35s;
+    position:relative;
+  }
+  .actor .face{
+    font-size:26px;line-height:1;margin-bottom:6px;
+    display:block;transition:.35s;
+  }
+  .actor .name{font-size:12px;font-weight:700;}
+  .actor .role{font-size:10px;color:#7a7364;margin-top:2px;min-height:24px;}
+  .actor.lit{
+    border-color:currentColor;
+    background:#fff;
+    box-shadow:0 4px 14px rgba(0,0,0,.08);
+    transform:translateY(-3px);
+  }
+  .actor.user{color:var(--user);}
+  .actor.browser{color:var(--browser);}
+  .actor.app{color:var(--app);}
+  .actor.authz{color:var(--authz);}
+  .actor.resource{color:var(--resource);}
+
+  /* 持ち物（トークン置き場） */
+  .holds{
+    display:flex;flex-wrap:wrap;gap:3px;justify-content:center;
+    margin-top:8px;min-height:22px;
+  }
+  .chip{
+    font-size:9.5px;font-weight:700;color:#fff;
+    padding:2px 6px;border-radius:20px;white-space:nowrap;
+    animation:pop .4s ease;position:relative;
+  }
+  .chip.code{background:var(--code);}
+  .chip.id{background:var(--idtok);}
+  .chip.acc{background:var(--acctok);}
+  .chip.consent{background:#555;}
+  /* 保持のしかた */
+  .chip.kept{                     /* 持ち続ける：実線・鍵マーク */
+    box-shadow:0 0 0 2px rgba(0,0,0,.12);
+  }
+  .chip.kept::after{content:" 🔒";font-size:8px;}
+  .chip.temp{                     /* 一時的に使うだけ：点線・半透明 */
+    opacity:.85;border:1.5px dashed rgba(255,255,255,.9);
+  }
+  .chip.spent{                    /* 使い捨て済み：グレーで打ち消し */
+    background:#b7b0a0 !important;text-decoration:line-through;opacity:.7;
+  }
+  @keyframes pop{from{transform:scale(.4);opacity:0;}to{transform:scale(1);opacity:1;}}
+
+  /* 飛ぶトークン */
+  .flyer{
+    position:absolute;z-index:5;top:0;left:0;
+    font-size:10px;font-weight:700;color:#fff;
+    padding:3px 9px;border-radius:20px;
+    pointer-events:none;opacity:0;
+    box-shadow:0 3px 10px rgba(0,0,0,.25);
+  }
+  .flyer.code{background:var(--code);}
+  .flyer.id{background:var(--idtok);}
+  .flyer.acc{background:var(--acctok);}
+  .flyer.consent{background:#555;}
+  .flyer.req{background:#333;}
+
+  /* 説明パネル */
+  .panel{
+    border:1.5px solid var(--line);
+    background:#fbf9f3;border-radius:14px;
+    padding:16px 18px;margin-bottom:16px;min-height:150px;
+  }
+  .panel .step-no{
+    font-size:11px;letter-spacing:.14em;font-weight:700;
+    color:#8a8272;text-transform:uppercase;
+  }
+  .panel .tag{
+    display:inline-block;font-size:11px;font-weight:700;
+    padding:2px 10px;border-radius:20px;margin-left:8px;vertical-align:1px;
+  }
+  .tag.authn{background:#e5ecf5;color:var(--authz);}
+  .tag.authz-t{background:#e7f0e0;color:var(--resource);}
+  .tag.human{background:#e3efee;color:var(--user);}
+  .panel h2{font-size:17px;margin:6px 0 8px;}
+  .panel .who{font-size:12.5px;color:#6a6455;margin-bottom:8px;}
+  .panel .who b{color:var(--ink);}
+  .panel .desc{font-size:14px;margin:0;}
+  .panel .desc em{font-style:normal;background:#efe9d8;padding:0 4px;border-radius:3px;}
+
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  button{
+    font:inherit;font-weight:700;font-size:14px;
+    padding:11px 20px;border-radius:24px;border:1.5px solid var(--ink);
+    background:var(--ink);color:var(--paper);cursor:pointer;transition:.2s;
+  }
+  button:hover{transform:translateY(-1px);}
+  button:disabled{opacity:.3;cursor:default;transform:none;}
+  /* 副ボタン：主ボタンより控えめだが、常にはっきり押せる見た目 */
+  button.ghost{
+    background:#e7e0cf;color:var(--ink);border-color:#b9ad92;
+  }
+  button.ghost:hover{background:#ded5c0;}
+  .progress{font-size:12px;color:#7a7364;margin-left:auto;}
+
+  /* トークン中身カード */
+  .tokens{
+    display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;
+  }
+  .tokcard{
+    border:1.5px solid var(--line);border-radius:12px;
+    background:#fbf9f3;padding:12px 14px;
+    opacity:.55;transition:opacity .35s;
+  }
+  .tokcard.filled{opacity:1;}
+  .tokcard.id{border-left:5px solid var(--idtok);}
+  .tokcard.acc{border-left:5px solid var(--acctok);}
+  .tokhead{
+    font-size:13px;font-weight:700;display:flex;align-items:center;
+    flex-wrap:wrap;gap:6px;margin-bottom:8px;
+  }
+  .tokhead .dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
+  .tokcard.id .dot{background:var(--idtok);}
+  .tokcard.acc .dot{background:var(--acctok);}
+  .tokmeta{font-size:10.5px;font-weight:500;color:#8a8272;flex-basis:100%;}
+  .tokbody{
+    margin:0;font-family:"SFMono-Regular",Menlo,Consolas,monospace;
+    font-size:11.5px;line-height:1.5;color:#2c322f;
+    background:#fff;border:1px solid #e6dfcd;border-radius:8px;
+    padding:10px 12px;overflow-x:auto;white-space:pre;
+  }
+  .tokbody .k{color:#8a6d1f;}
+  .tokbody .s{color:#3358a0;}
+  .tokbody .c{color:#4a7a34;}
+  .tokbody .cm{color:#a49a83;font-style:italic;}
+  .toknote{font-size:11px;color:#6a6455;margin-top:8px;}
+  @media(max-width:560px){ .tokens{grid-template-columns:1fr;} }
+
+  .legend{
+    display:flex;flex-wrap:wrap;gap:12px;margin-top:20px;
+    font-size:11.5px;color:#6a6455;
+  }
+  .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block;}
+
+  @media(max-width:560px){
+    .actor .role{display:none;}
+    .actor .face{font-size:22px;}
+    .actor .name{font-size:10.5px;}
+    .holds .chip{font-size:8.5px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>認可コードフローを歩いて理解する</h1>
+    <p>「Googleでログイン」を押したとき、裏で何が誰から誰へ渡っているのか。「次へ」で1ステップずつ進みます。各ステップの動きは入った時に1回だけ再生され、あとは静止したまま。もう一度見たいときは「▶ もう一度」を押してください。</p>
+  </header>
+
+  <div class="stage">
+    <div class="actors" id="actors">
+      <div class="actor user" data-key="user">
+        <span class="face">🧑</span>
+        <div class="name">あなた</div>
+        <div class="role">リソースの持ち主</div>
+        <div class="holds" id="hold-user"></div>
+      </div>
+      <div class="actor browser" data-key="browser">
+        <span class="face">🌐</span>
+        <div class="name">ブラウザ</div>
+        <div class="role">あなたの手足</div>
+        <div class="holds" id="hold-browser"></div>
+      </div>
+      <div class="actor app" data-key="app">
+        <span class="face">📱</span>
+        <div class="name">アプリ</div>
+        <div class="role">RP / クライアント</div>
+        <div class="holds" id="hold-app"></div>
+      </div>
+      <div class="actor authz" data-key="authz">
+        <span class="face">🔑</span>
+        <div class="name">認可サーバ</div>
+        <div class="role">Google (IdP)</div>
+        <div class="holds" id="hold-authz"></div>
+      </div>
+      <div class="actor resource" data-key="resource">
+        <span class="face">🗄️</span>
+        <div class="name">API</div>
+        <div class="role">リソースサーバ</div>
+        <div class="holds" id="hold-resource"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel">
+    <div class="step-no" id="stepno">START</div>
+    <h2 id="title">Googleでログイン ― 認可コードフロー</h2>
+    <div class="who" id="who"></div>
+    <p class="desc" id="desc">自動で1ステップずつ進みます。各ステップで「今は認証か認可か」「誰から誰へ何が渡ったか」を表示します。</p>
+  </div>
+
+  <div class="controls">
+    <button id="prev" class="ghost">◀ 戻る</button>
+    <button id="replay" class="ghost">▶ もう一度</button>
+    <button id="next">次へ ▶</button>
+    <button id="reset" class="ghost">最初から</button>
+    <span class="progress" id="progress"></span>
+  </div>
+
+  <!-- トークンの中身（解説用に開いて見せる。常時表示） -->
+  <div class="tokens" id="tokens">
+    <div class="tokcard id" id="card-id">
+      <div class="tokhead">
+        <span class="dot"></span>IDトークン
+        <span class="tokmeta">JWT・アプリが開いて読む「あなたが誰か」の証明</span>
+      </div>
+      <pre class="tokbody" id="body-id"><span class="cm">// STEP 7 で発行されると、ここに中身が表示されます</span></pre>
+      <div class="toknote" id="note-id"></div>
+    </div>
+    <div class="tokcard acc" id="card-acc">
+      <div class="tokhead">
+        <span class="dot"></span>アクセストークン
+        <span class="tokmeta">通常は中身の見えない通行証「何をしてよいか」</span>
+      </div>
+      <pre class="tokbody" id="body-acc"><span class="cm">// STEP 7 で発行されると、ここに中身が表示されます</span></pre>
+      <div class="toknote" id="note-acc"></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:var(--code)"></i>認可コード（引換券）</span>
+    <span><i style="background:var(--idtok)"></i>IDトークン（誰か の証明）</span>
+    <span><i style="background:var(--acctok)"></i>アクセストークン（何をしてよいか）</span>
+    <span><i style="background:#555"></i>ログイン&同意</span>
+    <span style="flex-basis:100%;height:0"></span>
+    <span>🔒 = 持ち続ける／点線枠 = 一時的に使うだけ／取り消し線 = 使い終えて失効</span>
+  </div>
+</div>
+
+<script>
+// ---- 登場人物の位置を測るユーティリティ ----
+const actorsEl = document.getElementById('actors');
+const stageEl = document.querySelector('.stage');
+function centerOf(key){
+  const el = actorsEl.querySelector(`.actor[data-key="${key}"] .face`);
+  const s = stageEl.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return { x: r.left - s.left + r.width/2, y: r.top - s.top + r.height/2 };
+}
+
+// ---- 飛ぶトークンのアニメーション ----
+// FAST時はアニメを描かず即解決（手前の状態を一気に再構築するため）
+let FAST = false;
+function fly(from, to, cls, label){
+  if(FAST) return Promise.resolve();
+  return new Promise(res=>{
+    const a = centerOf(from), b = centerOf(to);
+    const f = document.createElement('div');
+    f.className = 'flyer ' + cls;
+    f.textContent = label;
+    stageEl.appendChild(f);
+    f.style.left = a.x + 'px'; f.style.top = a.y + 'px';
+    f.style.transform = 'translate(-50%,-50%) scale(.6)';
+    requestAnimationFrame(()=>{
+      f.style.transition = 'left .8s cubic-bezier(.5,0,.3,1), top .8s cubic-bezier(.5,0,.3,1), opacity .8s';
+      f.style.opacity = 1;
+      f.style.left = b.x + 'px'; f.style.top = b.y + 'px';
+      f.style.transform = 'translate(-50%,-50%) scale(1)';
+    });
+    setTimeout(()=>{ f.style.opacity = 0; }, 950);
+    setTimeout(()=>{ f.remove(); res(); }, 1150);
+  });
+}
+
+function lightOnly(keys){
+  actorsEl.querySelectorAll('.actor').forEach(a=>{
+    a.classList.toggle('lit', keys.includes(a.dataset.key));
+  });
+}
+function addChip(key, cls, label, keep){
+  const box = document.getElementById('hold-'+key);
+  if([...box.children].some(c=>c.dataset.label===label)) return;
+  const c = document.createElement('span');
+  c.className = 'chip ' + cls + (keep ? ' '+keep : '');
+  c.textContent = label;
+  c.dataset.label = label;
+  box.appendChild(c);
+}
+// 既存チップの保持状態を変える（temp→spent など）
+function markChip(key, label, keep){
+  const box = document.getElementById('hold-'+key);
+  const c = [...box.children].find(x=>x.dataset.label===label);
+  if(c){ c.classList.remove('temp','kept','spent'); if(keep) c.classList.add(keep); }
+}
+function removeChip(key, label){
+  const box = document.getElementById('hold-'+key);
+  const c = [...box.children].find(x=>x.dataset.label===label);
+  if(c) c.remove();
+}
+function clearChips(){
+  ['user','browser','app','authz','resource'].forEach(k=>{
+    document.getElementById('hold-'+k).innerHTML='';
+  });
+}
+
+// ---- トークンの中身（実際のOIDC/OAuthのクレームを模した例。値はサンプル） ----
+const idTokenBody =
+`{
+  <span class="k">"iss"</span>: <span class="s">"https://accounts.google.com"</span>,  <span class="cm">// 発行者：誰が認証したか</span>
+  <span class="k">"aud"</span>: <span class="s">"myapp-1234.apps.google"</span>,     <span class="cm">// 宛先：どのアプリ向けか</span>
+  <span class="k">"sub"</span>: <span class="s">"108423...9921"</span>,             <span class="cm">// 主体：あなたの一意なID</span>
+  <span class="k">"email"</span>: <span class="s">"you@example.com"</span>,        <span class="cm">// 属性（クレーム）</span>
+  <span class="k">"name"</span>: <span class="s">"山田 太郎"</span>,
+  <span class="k">"iat"</span>: <span class="c">1734600000</span>,               <span class="cm">// いつ発行したか</span>
+  <span class="k">"exp"</span>: <span class="c">1734603600</span>                <span class="cm">// いつ切れるか</span>
+}`;
+const idTokenNote =
+`これは <b>JWT</b> の中身（ペイロード）。前後に署名が付き、アプリは署名を検証して「Googleが確かに発行した」と信頼します。ここに<b>権限は入っていません</b>——あくまで「誰か」の証明です。`;
+
+const accTokenRaw =
+`ya29.a0AfH6SMBx7Qk2...       <span class="cm">// 通常アプリから見える姿は</span>
+                             <span class="cm">// この不透明な文字列だけ。</span>
+                             <span class="cm">// アプリは中を読まず、APIに渡すだけ。</span>`;
+const accTokenDecoded =
+`{
+  <span class="k">"scope"</span>: <span class="s">"profile email"</span>,      <span class="cm">// 許された操作範囲＝認可</span>
+  <span class="k">"aud"</span>: <span class="s">"https://api.google.com"</span>,  <span class="cm">// 宛先：どのAPI向けか</span>
+  <span class="k">"client_id"</span>: <span class="s">"myapp-1234"</span>,       <span class="cm">// どのアプリに出したか</span>
+  <span class="k">"exp"</span>: <span class="c">1734603600</span>
+}`;
+const accTokenNote =
+`上が<b>普段アプリが目にする姿</b>（中身の読めない通行証）。下は解説のため、<b>リソースサーバが検証時に確認する中身</b>を特別に開いたもの。<b>権限（scope）はこちら</b>に入っています。`;
+
+const CARD_PLACEHOLDER = '<span class="cm">// STEP 7 で発行されると、ここに中身が表示されます</span>';
+function showCard(which, bodyHtml, noteHtml){
+  document.getElementById('body-'+which).innerHTML = bodyHtml;
+  document.getElementById('note-'+which).innerHTML = noteHtml;
+  document.getElementById('card-'+which).classList.add('filled');
+}
+function resetCards(){
+  ['id','acc'].forEach(w=>{
+    document.getElementById('body-'+w).innerHTML = CARD_PLACEHOLDER;
+    document.getElementById('note-'+w).innerHTML = '';
+    document.getElementById('card-'+w).classList.remove('filled');
+  });
+}
+
+// ---- シナリオ定義 ----
+const steps = [
+  {
+    no:'STEP 1 / 8', tagClass:'human', tagText:'人間の操作',
+    title:'「Googleでログイン」を押す',
+    who:'<b>あなた → アプリ</b>',
+    desc:'あなたがアプリの画面でボタンを押しました。アプリはまだ、あなたが誰なのかを知りません。アプリは「本人確認は自分ではやらず、Googleに任せよう」と決めます。',
+    run:async()=>{ lightOnly(['user','app']); await fly('user','app','req','クリック'); }
+  },
+  {
+    no:'STEP 2 / 8', tagClass:'human', tagText:'認証の入口',
+    title:'ブラウザが認可サーバへ送られる',
+    who:'<b>アプリ → ブラウザ → 認可サーバ</b>',
+    desc:'アプリはブラウザを Google の画面へ飛ばします。このとき「私はこのアプリです／プロフィールを見たい（スコープ）」という要求を一緒に持たせます。<em>まだ何のトークンも発行されていません。</em>',
+    run:async()=>{ lightOnly(['app','browser','authz']); await fly('app','browser','req','リダイレクト'); await fly('browser','authz','req','認可リクエスト'); }
+  },
+  {
+    no:'STEP 3 / 8', tagClass:'authn', tagText:'認証',
+    title:'あなたがGoogleにログインする',
+    who:'<b>あなた ⇄ 認可サーバ</b>',
+    desc:'ここが<em>認証</em>です。パスワードやパスキーで「あなたが本人であること」をGoogleが確かめます。アプリはこの瞬間を一切見ていません（パスワードはアプリに渡らない）。',
+    run:async()=>{ lightOnly(['user','authz']); await fly('user','authz','consent','ログイン'); addChip('authz','consent','セッション','kept'); }
+  },
+  {
+    no:'STEP 4 / 8', tagClass:'authn', tagText:'同意',
+    title:'アプリへの権限を同意する',
+    who:'<b>あなた → 認可サーバ</b>',
+    desc:'「このアプリにプロフィールを渡してよいですか？」に、あなたが同意します。これが<em>認可（委譲）の承認</em>。あなたは自分の権限の一部を、アプリに渡すことを認めました。',
+    run:async()=>{ lightOnly(['user','authz']); await fly('user','authz','consent','同意する'); addChip('authz','consent','同意記録','kept'); }
+  },
+  {
+    no:'STEP 5 / 8', tagClass:'authz-t', tagText:'引換券の発行',
+    title:'認可コード（引換券）が返る',
+    who:'<b>認可サーバ → ブラウザ → アプリ</b>',
+    desc:'Googleはいきなりトークンを渡しません。まず<em>引換券（認可コード）</em>だけをブラウザ経由でアプリに渡します。盗まれても引換券単体では中身を取り出せないための用心です。',
+    run:async()=>{
+      lightOnly(['authz','browser','app']);
+      await fly('authz','browser','code','認可コード');
+      await fly('browser','app','code','認可コード');
+      addChip('app','code','認可コード','temp');  // アプリが一時的に持つ（ブラウザは通過のみ）
+    }
+  },
+  {
+    no:'STEP 6 / 8', tagClass:'authz-t', tagText:'裏側の交換',
+    title:'アプリが裏で引換券をトークンに交換',
+    who:'<b>アプリ → 認可サーバ（サーバ間・ブラウザを通らない）</b>',
+    desc:'アプリは引換券に加えて「自分がこのアプリである証明（クライアント認証）」を添えて、裏側でGoogleに送ります。ブラウザを経由しない安全な経路です。使い終わった<em>認可コードは即失効</em>し、二度は使えません。',
+    run:async()=>{
+      lightOnly(['app','authz']);
+      await fly('app','authz','code','コード＋アプリ証明');
+      markChip('app','認可コード','spent');   // 使い捨て：打ち消し表示で残す
+    }
+  },
+  {
+    no:'STEP 7 / 8', tagClass:'authz-t', tagText:'トークン発行',
+    title:'2種類のトークンが同時に返る',
+    who:'<b>認可サーバ → アプリ</b>',
+    desc:'検証OK。ここで<em>IDトークン（あなたが誰か）</em>と<em>アクセストークン（何をしてよいか）</em>が、同じ交換で同時にアプリへ発行されます。出どころは同じ、役割だけが違います。',
+    run:async()=>{
+      lightOnly(['authz','app']);
+      removeChip('app','認可コード');   // 役目を終えたコードを片付ける
+      await fly('authz','app','id','IDトークン'); await fly('authz','app','acc','アクセストークン');
+      addChip('app','id','IDトークン','kept'); addChip('app','acc','アクセストークン','kept');
+      showCard('id', idTokenBody, idTokenNote);
+      showCard('acc', accTokenRaw, accTokenNote);
+    }
+  },
+  {
+    no:'STEP 8 / 8', tagClass:'authz-t', tagText:'認可',
+    title:'それぞれのトークンを使い分ける',
+    who:'<b>アプリが2つのトークンを別々の相手に使う</b>',
+    desc:'IDトークンはアプリが開いて読み、ログインを成立させたら<em>役目は終わり</em>（セッションに置き換わる）。一方アクセストークンは<em>アプリが持ち続け</em>、あとから何度でもAPIを叩けます。本人がいなくても動くのはこのため。',
+    run:async()=>{
+      lightOnly(['app','resource']);
+      // IDトークンはアプリが自分で読む → 役目を終える
+      await fly('app','app','id','中を読む→ログイン成立');
+      markChip('app','IDトークン','spent');
+      // アクセストークンはAPIへ提示（アプリはこれを持ち続ける）
+      await fly('app','resource','acc','アクセストークン');
+      addChip('resource','acc','トークン検証','temp');  // APIは検証に使うだけ
+      // リソースサーバ側が確認する中身を開いて見せる
+      showCard('acc', accTokenDecoded, accTokenNote);
+      await fly('resource','app','req','プロフィール');
+      markChip('resource','トークン検証','spent');
+    }
+  }
+];
+
+const prevBtn = document.getElementById('prev');
+const replayBtn = document.getElementById('replay');
+const nextBtn = document.getElementById('next');
+const resetBtn = document.getElementById('reset');
+const stepno = document.getElementById('stepno');
+const titleEl = document.getElementById('title');
+const whoEl = document.getElementById('who');
+const descEl = document.getElementById('desc');
+const progress = document.getElementById('progress');
+
+function renderPanel(s){
+  stepno.textContent = s.no;
+  titleEl.innerHTML = s.title + `<span class="tag ${s.tagClass}">${s.tagText}</span>`;
+  whoEl.innerHTML = s.who;
+  descEl.innerHTML = s.desc;
+}
+
+let cur = -1;             // -1 = スタート画面
+let token = 0;            // 走っている再生を無効化する世代トークン
+
+const CARD_STEP = 6;      // STEP7 (index 6) でカードが埋まる
+
+function clearStage(){
+  clearChips();
+  lightOnly([]);
+}
+
+// 0..upto の run を、アニメなし(FAST)で一気に適用して盤面を再構築
+async function rebuildUpTo(upto){
+  clearStage();
+  // 再構築範囲にカード発行ステップが含まれないなら、カードは空に戻す
+  if(upto < CARD_STEP) resetCards();
+  FAST = true;
+  for(let k=0; k<=upto; k++){ await steps[k].run(); }
+  FAST = false;
+}
+
+function showStart(){
+  clearStage();
+  resetCards();
+  stepno.textContent = 'START';
+  titleEl.textContent = 'Googleでログイン ― 認可コードフロー';
+  whoEl.innerHTML = '';
+  descEl.innerHTML = '「次へ」で1ステップずつ進みます。各ステップの動きは入った時に1回だけ再生され、そのあとは静止したまま残ります。もう一度見たいときは「▶ もう一度」を押してください。';
+  progress.textContent = `0 / ${steps.length}`;
+}
+
+function updateButtons(){
+  // 戻る・最初からは常に押せる。次へは最終ステップで完了表示にして止める。
+  nextBtn.disabled = (cur >= steps.length-1);
+  nextBtn.textContent = (cur >= steps.length-1) ? '完了 ✓' : '次へ ▶';
+  replayBtn.disabled = (cur < 0) || animating;   // スタート画面や再生中は押せない
+}
+
+// 今のステップのアニメを1回だけ再生する
+let animating = false;
+async function animateCurrent(){
+  if(cur < 0) return;
+  token++;
+  const my = token;
+  animating = true;
+  updateButtons();
+  await rebuildUpTo(cur-1);        // 手前の確定状態に戻してから
+  if(my!==token) return;           // 途中で別操作が入ったら中断
+  await steps[cur].run();          // 今ステップを1回見せる（終わったら静止）
+  if(my!==token) return;
+  animating = false;
+  updateButtons();
+}
+
+// ステップを切り替えて1回再生（古い再生は animateCurrent 内の token++ で無効化される）
+async function playStep(idx){
+  cur = idx;
+  renderPanel(steps[idx]);
+  progress.textContent = `${idx+1} / ${steps.length}`;
+  await animateCurrent();
+}
+
+function goStart(){
+  token++;
+  animating = false;
+  cur = -1;
+  showStart();
+  updateButtons();
+}
+
+nextBtn.addEventListener('click', ()=>{
+  if(cur < steps.length-1) playStep(cur+1);
+});
+prevBtn.addEventListener('click', ()=>{
+  if(cur > 0) playStep(cur-1);
+  else goStart();
+});
+replayBtn.addEventListener('click', animateCurrent);
+resetBtn.addEventListener('click', goStart);
+
+goStart();
+</script>
+</body>
+</html>
